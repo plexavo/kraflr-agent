@@ -1,0 +1,53 @@
+name: release
+
+# Push a tag such as v1.0.0 to test, build and publish that release. "Run workflow" does the same without publishing.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  linux-x64:
+    # The oldest supported system: a build made here also runs on newer ones.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check that the tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/')
+        run: test "v$(sed -n 's/^ *"version": *"\([^"]*\)".*/\1/p' package.json)" = "$GITHUB_REF_NAME"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+
+      - name: Type check and test
+        run: |
+          npm install --global pnpm@12.21.0
+          pnpm install --frozen-lockfile
+          node scripts/ensure-native-terminal.mjs
+          node node_modules/typescript/bin/tsc --noEmit
+          node --test tests/*.test.ts
+
+      - name: Build the release
+        run: sh scripts/package-release.sh
+
+      - name: Install the built release and check it
+        run: |
+          KRAFLR_RELEASE_URL="file://$PWD/dist" KRAFLR_INSTALL_DIR="$RUNNER_TEMP/kraflr" KRAFLR_BIN_DIR="$RUNNER_TEMP/bin" sh install.sh
+          "$RUNNER_TEMP/bin/kraflr" doctor
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kraflr-agent-linux-x64
+          path: dist/
+
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/*.sha256 --title "Kraflr Agent $GITHUB_REF_NAME" --generate-notes

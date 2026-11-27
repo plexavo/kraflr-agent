@@ -1,0 +1,40 @@
+{
+  "name": "kraflr-agent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A terminal workspace for authorized security research with Claude Code, OpenCode and Cline.",
+  "license": "Apache-2.0",
+  "author": "Plexavo Labs",
+  "homepage": "https://kraflragent.plexavo.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/plexavo/kraflr-agent.git"
+  },
+  "bugs": "https://github.com/plexavo/kraflr-agent/issues",
+  "type": "module",
+  "bin": {
+    "kraflr": "bin/kraflr.mjs"
+  },
+  "packageManager": "pnpm@12.21.0",
+  "engines": {
+    "node": ">=26.13.1 <27"
+  },
+  "scripts": {
+    "postinstall": "node scripts/ensure-native-terminal.mjs",
+    "start": "node bin/kraflr.mjs",
+    "check": "tsc --noEmit",
+    "test": "node --test tests/*.test.ts"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "2.12.0",
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "@xterm/headless": "6.0.0",
+    "fastify": "5.12.8",
+    "node-pty": "1.1.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.10",
+    "typescript": "7.0.2"
+  }
+}

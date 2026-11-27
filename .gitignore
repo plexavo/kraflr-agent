@@ -1,0 +1,22 @@
+# Dependencies and builds
+node_modules/
+dist/
+.tools/
+
+# Local research data, scratch folders and anything a session writes
+data/
+data-backup/
+data-backup-*/
+.kraflr/
+
+# Secrets, logs and editor or system files
+.env
+.env.*
+*.pem
+*.key
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
