@@ -14,11 +14,9 @@
 
 [Website](https://kraflragent.plexavo.com) · [Guide](docs/guide.md) · [Issues](https://github.com/plexavo/kraflr-agent/issues)
 
-</div>
+![Kraflr Agent, a 15-second demo](docs/images/demo.gif)
 
-<!-- Screenshot: add docs/images/workspace.png, then move the next line out of this comment.
-![Kraflr workspace with a Parent and a Child agent](docs/images/workspace.png)
--->
+</div>
 
 > [!NOTE]
 > Use Kraflr only on code and systems you own or are authorized to test.
@@ -55,9 +53,34 @@ You also need `git`. Docker, Semgrep and Burp Suite are optional. On a minimal s
 3. **Kickoff prompt**, or type your own request in the Parent's pane.
 4. Review what appears under **Leads** and **Findings**.
 
-<!-- Screenshot: add docs/images/findings.png, then move the next line out of this comment.
-![A Finding with its proof](docs/images/findings.png)
--->
+## Screenshots
+
+<table>
+<tr>
+<td width="50%"><b>Leads</b><br>Every open hypothesis, as an agent records it.</td>
+<td width="50%"><b>Verify, challenge, or accept</b><br>You decide what happens to a lead next.</td>
+</tr>
+<tr>
+<td><a href="docs/images/leads.png"><img src="docs/images/leads.png"></a></td>
+<td><a href="docs/images/lead-detail.png"><img src="docs/images/lead-detail.png"></a></td>
+</tr>
+<tr>
+<td><b>Findings</b><br>What an agent confirmed, or you accepted yourself.</td>
+<td><b>A Finding's proof</b><br>Labelled when an agent confirmed it itself.</td>
+</tr>
+<tr>
+<td><a href="docs/images/findings.png"><img src="docs/images/findings.png"></a></td>
+<td><a href="docs/images/finding-proof.png"><img src="docs/images/finding-proof.png"></a></td>
+</tr>
+<tr>
+<td><b>Parent and Child, side by side</b><br>Independent terminal panes in one workspace.</td>
+<td><b>An agent stops, work continues</b><br>Hand its saved context to another agent.</td>
+</tr>
+<tr>
+<td><a href="docs/images/workspace.png"><img src="docs/images/workspace.png"></a></td>
+<td><a href="docs/images/agent-recovery.png"><img src="docs/images/agent-recovery.png"></a></td>
+</tr>
+</table>
 
 ## Leads and Findings
 
