@@ -1,8 +1,9 @@
 <div align="center">
 
-<img src="docs/images/logo.png" alt="Kraflr Agent logo" width="96">
-
-# Kraflr Agent
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/logo.png">
+  <img src="docs/images/logo-light.png" alt="Kraflr Agent" width="440">
+</picture>
 
 **A terminal workspace for authorized security research with the coding agents you already use.**
 
