@@ -7,6 +7,10 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 import { runSemgrepProcess, summarize, type SemgrepSpawn } from './semgrep-scan.ts'
 import { resolveBurpUrl } from './kraflr-settings.ts'
 import { burpFailure, burpHint } from '../shared/burp.ts'
+import { createResponseTrimmer, trimProperties } from './response-trim.ts'
+
+/** Burp's tools that send a request and return the response. */
+const sendsRequest = (name: string) => /^send_http.*request$/.test(name)
 
 const semgrepTool: Tool = {
   name: 'semgrep_scan',
@@ -40,9 +44,28 @@ const defaultBurpConnect: BurpConnect = async (url) => {
  * One MCP server for every Kraflr agent session, instead of wiring Burp's MCP server and Semgrep's into each agent CLI
  * separately. It exposes `semgrep_scan` itself, and — once the researcher has set their running Burp Suite's MCP
  * endpoint — proxies whatever tools Burp currently reports, prefixed `burp_`, forwarding each call through unchanged.
+ * With a `responseDir`, long responses from Burp's request tools come back shortened and are saved whole in that folder.
  * An agent configures one server ("kraflr") and sees both; Kraflr never bundles or starts Burp itself.
  */
-export function createGateway(options: { burpUrl?: string | (() => string | undefined); runSemgrep?: SemgrepSpawn; connectBurp?: BurpConnect } = {}) {
+export function createGateway(options: { burpUrl?: string | (() => string | undefined); runSemgrep?: SemgrepSpawn; connectBurp?: BurpConnect; responseDir?: string } = {}) {
+  const trim = options.responseDir ? createResponseTrimmer(options.responseDir) : undefined
+  const offered = (tool: Tool): Tool => {
+    const named = { ...tool, name: 'burp_' + tool.name }
+    return trim && sendsRequest(tool.name) ? { ...named, inputSchema: { ...tool.inputSchema, properties: { ...tool.inputSchema.properties, ...trimProperties } } } : named
+  }
+  /** Calls Burp without the gateway's own arguments, then applies them to the response it returns. */
+  async function forward(client: Client, name: string, args: Record<string, unknown> | undefined) {
+    if (!trim || !sendsRequest(name)) return client.callTool({ name, arguments: args })
+    const { kraflr_find: find, kraflr_headers_only: headersOnly, kraflr_full: full, ...rest } = args ?? {}
+    const result = await client.callTool({ name, arguments: rest })
+    if (result.isError || !Array.isArray(result.content)) return result
+    const content = (result.content as { type: string; text?: string }[]).map((item) => {
+      if (item.type !== 'text' || typeof item.text !== 'string') return item
+      // A response that cannot be saved is passed on whole rather than shortened and lost.
+      try { return { ...item, text: trim(item.text, { find: typeof find === 'string' && find ? find : undefined, headersOnly: headersOnly === true, full: full === true }) } } catch { return item }
+    })
+    return { ...result, content }
+  }
   // Asked every time, so a URL saved or changed after this session started is picked up without restarting it.
   const currentUrl = () => (typeof options.burpUrl === 'function' ? options.burpUrl() : options.burpUrl)?.trim() || undefined
   const connect = options.connectBurp ?? defaultBurpConnect
@@ -114,7 +137,7 @@ export function createGateway(options: { burpUrl?: string | (() => string | unde
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const result = await connectBurp()
     listed = result?.url ?? ''
-    const burpTools: Tool[] = (result?.tools ?? []).map((tool) => ({ ...tool, name: 'burp_' + tool.name }))
+    const burpTools: Tool[] = (result?.tools ?? []).map(offered)
     return { tools: [semgrepTool, burpStatusTool, ...burpTools] }
   })
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -128,7 +151,7 @@ export function createGateway(options: { burpUrl?: string | (() => string | unde
       const original = name.slice('burp_'.length)
       if (!result.tools.some((tool) => tool.name === original)) return text('Burp does not report a tool named ' + original + '.', true)
       // A failed call is not repeated, since it may already have sent a request; the next one reconnects.
-      try { return await result.client.callTool({ name: original, arguments: args }) }
+      try { return await forward(result.client, original, args) }
       catch (error) { drop(); throw error }
     }
     return text('Unknown tool: ' + name, true)
@@ -139,5 +162,5 @@ export function createGateway(options: { burpUrl?: string | (() => string | unde
 if (import.meta.main) {
   const settings = process.env.KRAFLR_SETTINGS_DIR
   // Without a settings folder only the environment counts; a settings file in the working folder is never trusted.
-  await createGateway({ burpUrl: () => settings ? resolveBurpUrl(settings) : process.env.KRAFLR_BURP_MCP_URL }).connect(new StdioServerTransport())
+  await createGateway({ burpUrl: () => settings ? resolveBurpUrl(settings) : process.env.KRAFLR_BURP_MCP_URL, responseDir: process.env.KRAFLR_RESPONSE_DIR }).connect(new StdioServerTransport())
 }

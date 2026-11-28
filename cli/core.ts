@@ -19,7 +19,8 @@ import{labGuard}from'../server/lab-guard.ts'
 import{verificationNotifications}from'./verification-notifications.ts'
 import{createDelivery}from'./delivery.ts'
 import{createHandoff}from'./handoff.ts'
-import{recordLead,confirmLead}from'./agent-lead.ts'
+import{recordLead,confirmLead,killLead}from'./agent-lead.ts'
+import{createRecordingReminders}from'./recording.ts'
 import{createScopeProxy}from'../server/scope-proxy.ts'
 import{createTrafficLog}from'../server/traffic-log.ts'
 import{createSurfaceMap}from'../server/surface-map.ts'
@@ -66,6 +67,7 @@ async function startCore(dataDir:string,release:()=>Promise<void>){
   const clients = new Set<Socket>()
   const attached=new Map<string,Socket>(),sizes=new Map<string,{cols:number;rows:number}>()
   const progress=new Map<string,{text:string;at:string}>()
+  const reminders=createRecordingReminders(store)
   let closing = false
   const owner = (supplied: unknown) => typeof supplied === 'string' && supplied.length === token.length && timingSafeEqual(Buffer.from(supplied), Buffer.from(token))
   const inject = async (method: string, url: string, payload?: unknown) => {
@@ -104,7 +106,7 @@ async function startCore(dataDir:string,release:()=>Promise<void>){
               const agent = native.terminals.list().find(item => item.id === request.agent && item.state === 'running')
               if (!agent) throw new StoreError(409, 'This agent has stopped.')
               store.readSourceScope(agent.panelId, agent.scopeVersion ?? 0)
-              if (request.method === 'hook') result = await native.hook(agent.id, params)
+              if (request.method === 'hook') result = await reminders.hook(agent, params, native.assigned(agent.id), event => native.hook(agent.id, event))
               else if (request.method === 'context') {
                 const panel = store.readPanel(agent.panelId)
                 if (panel.type !== 'web') {
@@ -129,11 +131,13 @@ async function startCore(dataDir:string,release:()=>Promise<void>){
                 if (typeof params.text === 'string') {
                   if (!params.text.trim()) throw new StoreError(400, 'Provide the map text.')
                   try { result = surface.set(agent.panelId, native.redact(agent.id, params.text), params.append === true) } catch (error) { throw new StoreError(400, error instanceof Error ? error.message : 'The map could not be saved.') }
+                  reminders.recorded(agent.id)
                 } else result = surface.get(agent.panelId) ?? { text: '', updatedAt: '', note: 'No map has been saved for this panel yet.' }
               } else if (request.method === 'activity') {
                 // A tool call the agent's own hooks reported: recorded for the researcher, never a decision.
-                if(typeof params.tool!=='string'||!/^[A-Za-z_]{2,40}$/.test(params.tool)||typeof params.summary!=='string')throw new StoreError(400,'Provide the tool and what it was given.')
-                traffic.append({panelId:agent.panelId,agentId:agent.id,agent:agent.label,kind:'command',text:native.redact(agent.id,params.tool+': '+params.summary).slice(0,700)});result={}
+                if(typeof params.tool!=='string'||!/^[A-Za-z0-9_]{2,80}$/.test(params.tool)||typeof params.summary!=='string')throw new StoreError(400,'Provide the tool and what it was given.')
+                traffic.append({panelId:agent.panelId,agentId:agent.id,agent:agent.label,kind:'command',text:native.redact(agent.id,params.tool+': '+params.summary).slice(0,700)})
+                result={context:reminders.tool(agent,store.readPanel(agent.panelId).type,params.tool,params.summary)}
               } else if (request.method === 'guard') {
                 if(typeof params.command!=='string'||params.command.length>20_000)throw new StoreError(400,'Provide the shell command.')
                 const reason=await labGuard(store,agent,params.command,typeof params.cwd==='string'?params.cwd:'',record=>approvedDockerCommand(record).argv)
@@ -142,8 +146,13 @@ async function startCore(dataDir:string,release:()=>Promise<void>){
                 result={reason}
               } else if (request.method === 'lead') {
                 result=recordLead(store,agent,params,text=>native.redact(agent.id,text))
+                reminders.recorded(agent.id)
               } else if (request.method === 'confirm') {
                 result=confirmLead(store,agent,params,text=>native.redact(agent.id,text))
+                reminders.recorded(agent.id)
+              } else if (request.method === 'kill') {
+                result=killLead(store,agent,params,text=>native.redact(agent.id,text))
+                reminders.recorded(agent.id)
               } else if (request.method === 'record') {
                 if (typeof params.text !== 'string' || params.text.length > 128_000) throw new StoreError(400, 'Provide a bounded structured report.')
                 const text=native.redact(agent.id,params.text),parsed = report(text)
@@ -152,6 +161,7 @@ async function startCore(dataDir:string,release:()=>Promise<void>){
                 const now = new Date().toISOString(), run = { id:randomUUID(),panelId:agent.panelId,parentId:agent.id,parentName:agent.label,scopeVersion:agent.scopeVersion!,objective:'Native agent report',status:'running' as const,phase:'Native report saved',startedAt:now,endedAt:now,
                   reply:parsed.reply,summary:parsed.summary,fullReply:text,leads:parsed.leads,tasks:[],deadEnds:parsed.deadEnds,nextSteps:parsed.nextSteps }
                 store.startResearchRun(run); store.saveResearchRun({ ...run,status:'completed' }); result = { id:run.id,leads:parsed.leads.length }
+                reminders.recorded(agent.id)
               } else throw new StoreError(403, 'Agents can only use their scoped context, collaboration, report and verification commands.')
             } else {
               if (!owner(request.token)) throw new StoreError(403, 'This runtime capability is unavailable.')

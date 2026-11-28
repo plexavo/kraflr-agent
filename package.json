@@ -1,6 +1,6 @@
 {
   "name": "kraflr-agent",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "A terminal workspace for authorized security research with Claude Code, OpenCode and Cline.",
   "license": "Apache-2.0",

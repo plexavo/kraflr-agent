@@ -10,9 +10,11 @@ export interface GatewayServerConfig { command: string; args: string[]; env: Rec
  * The gateway is handed the data folder, not the Burp URL: it reads the saved URL when it needs it, so a URL set
  * or changed after a session started still reaches that session. KRAFLR_BURP_MCP_URL, when set, is passed through as an override.
  */
-export function gatewayServerConfig(node: string, root: string, dataDir?: string, override = process.env.KRAFLR_BURP_MCP_URL): GatewayServerConfig {
+export function gatewayServerConfig(node: string, root: string, dataDir?: string, override = process.env.KRAFLR_BURP_MCP_URL, responseDir?: string): GatewayServerConfig {
   const env: Record<string, string> = {}
   if (dataDir) env.KRAFLR_SETTINGS_DIR = dataDir
+  // Where this session's long web responses are saved whole when the gateway shortens them.
+  if (responseDir) env.KRAFLR_RESPONSE_DIR = responseDir
   if (override?.trim()) env.KRAFLR_BURP_MCP_URL = override.trim()
   return { command: node, args: [join(root, 'server', 'mcp-gateway.ts')], env }
 }

@@ -3,7 +3,7 @@ import { StoreError, type ResearchStore } from '../server/db.ts'
 import type { AgentTerminalInfo } from '../shared/agent-terminal.ts'
 import { report } from '../server/research-team.ts'
 import { recordId } from './agent-records.ts'
-import { agentConfirmed, isOpenLead } from '../shared/evidence.ts'
+import { agentConfirmed, agentKilled, isOpenLead } from '../shared/evidence.ts'
 
 const secureFields = [['--hypothesis', 'hypothesis'], ['--attack', 'attack'], ['--impact', 'impact']] as const
 
@@ -32,7 +32,43 @@ export function recordLead(store: ResearchStore, agent: AgentTerminalInfo, param
   // The saved ID (an update or a repeat resolves to the original lead) is what confirm and verification commands take.
   let saved = ''
   try { saved = store.readEvidence(agent.panelId, id || run + ':0').id } catch { /* The lead is saved; its ID is in `kraflr agent context`. */ }
-  return { recorded: true, title, ...(saved ? { id: saved } : {}), hint: 'Keep working. Once you have proven this beyond doubt, run kraflr agent confirm' + (saved ? ' ' + saved : ' <lead-id>') + ' --proof "..." --control "..."; otherwise leave it as a lead.' }
+  const target = saved ? ' ' + saved : ' <lead-id>'
+  return { recorded: true, title, ...(saved ? { id: saved } : {}), hint: 'Keep working. Once you have proven this beyond doubt, run kraflr agent confirm' + target + ' --proof "..." --control "...". If your test rules it out, run kraflr agent kill' + target + ' --tested "..." --reason "...". Otherwise leave it as a lead.' }
+}
+
+/**
+ * `kraflr agent kill`: the agent rules out a lead it has tested, or saves a dead end it never recorded as a lead. It must say what it tried and why
+ * that rules the flaw out. Kraflr does not check the test, so the note is labelled as the agent's and the researcher can reopen the lead. An agent
+ * cannot touch a Finding or overrule the researcher, a Docker test still in flight, or a second agent that upheld the lead.
+ */
+export function killLead(store: ResearchStore, agent: AgentTerminalInfo, params: Record<string, unknown>, redact: (text: string) => string = (text) => text) {
+  const field = (name: string, max: number) => typeof params[name] === 'string' ? redact(params[name] as string).trim().slice(0, max) : ''
+  const given = field('id', 80), tested = field('tested', 1500), reason = field('reason', 600)
+  if (tested.length < 40) throw new StoreError(400, '--tested must say what you actually tried and what came back, at least 40 characters.')
+  if (reason.length < 20) throw new StoreError(400, '--reason must say why that result rules the flaw out, at least 20 characters.')
+  let id = given
+  if (!id) {
+    const title = field('title', 160), path = field('path', 500)
+    if (!title || !path) throw new StoreError(400, 'Name the lead: kraflr agent kill <lead-id> --tested "..." --reason "...". For a dead end that was never a lead, leave out the ID and add --title and --path.')
+    const parsed = report('```kraflr-result\n' + JSON.stringify({ summary: title, leads: [{ kind: 'general', title, explanation: tested, path, startLine: 1, endLine: 1 }] }) + '\n```')
+    if (parsed.leads.length !== 1) throw new StoreError(400, 'Keep --path a short file path or endpoint.')
+    const now = new Date().toISOString(), run = recordId(agent.id + ':dead-end:' + randomUUID())
+    store.saveAgentRecord({ id: run, panelId: agent.panelId, parentId: agent.id, parentName: agent.label, scopeVersion: agent.scopeVersion!,
+      purpose: 'conversation', objective: 'Dead end recorded by ' + agent.label, status: 'completed', phase: 'Dead end recorded', startedAt: now, endedAt: now,
+      reply: title, summary: title, fullReply: tested, leads: parsed.leads, tasks: [], deadEnds: [], nextSteps: [] })
+    id = run + ':0'
+  }
+  const lead = store.readEvidence(agent.panelId, id)
+  if (lead.tag === 'killed_lead') return { killed: true, id: lead.id, hint: 'This lead is already in Killed leads.' }
+  if (lead.tag === 'finding') throw new StoreError(409, 'This is a Finding. Only the researcher can move it; tell them what you saw.')
+  if (given && !isOpenLead(lead)) throw new StoreError(409, 'Only an open lead can be killed.')
+  if (lead.scopeVersion !== agent.scopeVersion) throw new StoreError(409, 'This lead was recorded under an earlier scope. Only the researcher can close it.')
+  if (lead.verificationProgress?.active) throw new StoreError(409, 'A Docker verification of this lead is in progress; its approved run marks the lead.')
+  if (lead.reviews.some((review) => review.tag === 'finding' || review.status === 'closed')) throw new StoreError(409, 'The researcher already changed this lead’s status. Only the researcher can close it now.')
+  if (lead.reviews.some((review) => /^(?:Challenge|Verify) by .{1,80}?: (?:holds|confirmed)\./.test(review.note))) throw new StoreError(409, 'A second check upheld this lead. Report your evidence to the researcher, who decides.')
+  const note = `${agentKilled}${agent.label} (reported by the agent; Kraflr did not check it independently).\nTested: ${tested}\nReason: ${reason}`
+  store.saveLeadReview(agent.panelId, lead.id, { expectedVersion: lead.reviews[0]?.version ?? 0, status: 'closed', tag: 'killed_lead', note, nextAction: '' })
+  return { killed: true, id: lead.id, title: lead.title, hint: 'Saved in Killed leads with your reason. The researcher can reopen it.' }
 }
 
 /**

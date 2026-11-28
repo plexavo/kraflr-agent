@@ -23,8 +23,8 @@ export function claudeSettings(node: string, script: string, autonomy: Autonomy 
     hooks: {
       SessionStart: [hook('SessionStart')], UserPromptSubmit: [hook('UserPromptSubmit')], Stop: [hook('Stop')], StopFailure: [hook('StopFailure')],
       PreToolUse: [{ matcher: 'Bash|Agent|Task|TeamCreate|TeamDelete|SendMessage|Edit|Write|MultiEdit|NotebookEdit', ...hook('PreToolUse') }],
-      // Shell commands, file reads and fetches are recorded for the researcher after they run. The hook never changes a decision.
-      PostToolUse: [{ matcher: 'Bash|Read|Write|Edit|MultiEdit|WebFetch|WebSearch', ...hook('PostToolUse') }],
+      // Shell commands, file reads, fetches and gateway calls are recorded for the researcher after they run. The hook never changes a decision.
+      PostToolUse: [{ matcher: '^(?:Bash|Read|Write|Edit|MultiEdit|WebFetch|WebSearch|mcp__kraflr__.*)$', ...hook('PostToolUse') }],
     },
     // Bypass mode stays disabled: a free session is pre-allowed tool by tool, so Claude Code never shows its bypass warning and the hooks still run.
     permissions: { disableBypassPermissionsMode: 'disable', ...(autonomy === 'free' ? { allow: hasGateway ? [...freeTools, 'mcp__kraflr'] : freeTools } : {}) },

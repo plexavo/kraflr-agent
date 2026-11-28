@@ -56,6 +56,22 @@ kraflr agent confirm <lead-id> --proof "what it did and the real response or out
 
 Kraflr requires both parts but **does not check the proof itself**, so the Finding reads **Confirmed by agent**, the report labels it as not independently checked, and **Not valid · move back to Leads** reverses it. An agent cannot confirm a lead you already moved or killed, a lead with a Docker verification in progress, or one a Challenge or Verify did not confirm. Docker verification stays optional for source reviews as **Verify in Docker**.
 
+**Killed leads.** An agent records what its own testing ruled out, with what it tried and why that settles it:
+
+```
+kraflr agent kill <lead-id> --tested "what it tried and what came back" --reason "why that rules it out"
+```
+
+For a dead end that was never a lead, `--title` and `--path` replace the ID. Kraflr does not check the test, so the note reads **Killed by** the agent and **Reopen · move back to Leads** reverses it. An agent cannot kill a Finding, a lead you reopened, a lead with a Docker verification in progress, or one a Challenge or Verify upheld.
+
+**Recording reminders (Claude Code sessions).** So that records stay current when you write your own prompts, Kraflr's hooks remind the agent:
+
+- Each prompt carries the open leads and the recording commands.
+- After 15 tool calls with nothing recorded, the agent is reminded, and again after every further 15.
+- A turn with 8 or more such calls is held once before it ends, so the agent can record or say there was nothing. A report Kraflr is waiting for is never held.
+
+Start Kraflr with `KRAFLR_REMINDERS=off` to turn them off. OpenCode and Cline sessions get the instructions and the commands, but no reminders.
+
 Around that, from the Agents screen and the lead menu:
 
 - **Kickoff prompt** sends the prepared research prompt to the Parent whenever it is ready (it waits a short while for a starting agent). It first asks for a **hunt depth** (Strix-style presets): **Quick** (one agent, no delegation, ~15 minutes on the highest-value spots), **Standard** (the default — works alone and freely, delegates only when it clearly saves time), or **Deep** (exhaustive coverage, delegates to a Child freely, challenges and hunts variants as it goes). This only changes the prompt's wording; Kraflr does not enforce it. Nothing pops up when an agent starts, and the button disappears once the Parent has been given work, whether that was the kickoff or your own prompt. It stays available under **Agent controls → Research tools**.
@@ -67,6 +83,7 @@ Around that, from the Agents screen and the lead menu:
 - **Replay as a different account** (web panels, on a plain-HTTP entry in Traffic) is the Autorize pattern: resend a request Kraflr already captured with one header swapped for a second account's value (a session cookie, a bearer token) and diff the live response against the original. A matching status and a similar body for a different identity is the signal of broken access control — usually IDOR. The replay is sent directly by Kraflr, not through an agent, and logged as its own traffic entry; it never files a lead by itself. From the result, **Ask the Parent to confirm and record** hands it to the Parent to verify and, if it holds up, record with `kraflr agent lead`. This only works on a captured `http` entry — an HTTPS tunnel is never decrypted, so Kraflr never captured enough of the original request to resend it (see below).
 - **Export report** (Findings screen) writes a Markdown report into the agent workspace: scope, each Finding with the agents' write-up and either your evidence note or the agent's labelled confirmation, what was ruled out and why, what is still open, and for web panels the recorded requests.
 - **Tool gateway** gives every agent one MCP server ("kraflr") instead of a separate one per third-party tool. It exposes `semgrep_scan` itself (run it on demand on any path in the workspace, not just the automatic first pass above), plus `burp_status` and, only once set, every tool Burp Suite's own MCP server reports — each proxied under a `burp_` prefix, discovered live rather than hardcoded, so it tracks whatever your installed Burp version actually offers. Set your running Burp's MCP endpoint from **Agent controls → Research tools → Set Burp MCP URL** (Burp Suite's MCP server extension prints it; Kraflr never starts or bundles Burp itself) — it is saved in the data directory and survives restarts, so there is nothing to export in a shell profile. `KRAFLR_BURP_MCP_URL` still works as a one-off override for a single launch if you set it, taking priority over the saved value. The gateway reads the saved URL when it needs it, so running sessions pick up a new or changed URL on their next `burp_status` call and are told to refresh their tool list; if a CLI does not refresh it, reopen that session. Claude Code gets the gateway through a session `--mcp-config` file, OpenCode through an `mcp` entry in the session's `opencode.json`, and Cline through a session settings file named by `CLINE_MCP_SETTINGS_PATH`, which also keeps the MCP servers from your own Cline settings (servers added from inside a Kraflr Cline session stay in that session). Requests Burp sends for an agent leave from Burp itself, so Kraflr's scope proxy neither records nor blocks them.
+- **Short Burp responses.** A response over 6,000 characters from Burp's request tools reaches the agent as its status line, headers and the first 2,000 characters of the body; a body identical to an earlier one (apart from script nonces) is not repeated. The whole result is saved under `responses` in the session folder. The agent can add `kraflr_find` (a regular expression), `kraflr_headers_only` or `kraflr_full` to a request. Other tools, including proxy history, are passed through unchanged.
 
 Research panels show whether they are active or not: in **Research panels**, each shows `●` with how many agents are currently running, or `○ Idle` when none are.
 

@@ -95,7 +95,7 @@ test('Claude Code is told to use bash syntax for the bridge, never PowerShell', 
 
 // --- the hook script, driven over a real local socket exactly as Claude Code drives it ---
 const hook = resolve(import.meta.dirname, '..', 'cli', 'claude-hook.ts')
-async function relay() {
+async function relay(answer: (message: any) => object = () => ({})) {
   const folder = await realpath(await mkdtemp(join(tmpdir(), 'kraflr-claude-hook-')))
   const socket = process.platform === 'win32' ? `\\\\.\\pipe\\kraflr-test-${randomUUID()}` : join(folder, 'runtime.sock')
   const received: any[] = []
@@ -106,7 +106,7 @@ async function relay() {
       buffer += chunk
       for (let end; (end = buffer.indexOf('\n')) >= 0;) {
         const message = JSON.parse(buffer.slice(0, end)); buffer = buffer.slice(end + 1)
-        received.push(message); connection.write(JSON.stringify({ id: message.id, result: {} }) + '\n')
+        received.push(message); connection.write(JSON.stringify({ id: message.id, result: answer(message) }) + '\n')
       }
     })
   })
@@ -165,6 +165,20 @@ test('the Claude hook denies untracked sub-agents only in an ask session, always
     assert.equal(await verdict({ tool_name: 'Read', tool_input: { file_path: join(checkout, 'src', 'a.php') } }, readOnly), undefined, 'reading stays allowed')
     assert.equal(await verdict({ tool_name: 'Bash', tool_input: { command: 'ls' } }, readOnly), undefined)
     assert.equal(r.received.length, 0, 'tool checks never need the runtime')
+  } finally { await r.close() }
+})
+
+test('the Claude hook hands the runtime’s recording reminders back to Claude Code', async () => {
+  const r = await relay((message) => message.method === 'activity' ? { context: 'Record it.' }
+    : message.params.name === 'UserPromptSubmit' ? { context: '2 open leads.' } : message.params.continuing ? {} : { hold: 'Record before you finish.' })
+  try {
+    const out = async (event: object) => JSON.parse((await r.run(event)).stdout)
+    assert.deepEqual(await out({ hook_event_name: 'UserPromptSubmit', prompt: 'go' }), { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: '2 open leads.' } })
+    assert.deepEqual(await out({ hook_event_name: 'PostToolUse', tool_name: 'mcp__kraflr__burp_send_http1_request', tool_input: { targetHostname: 'app.example.test', content: 'GET /a HTTP/1.1\r\nCookie: secret=1\r\n\r\n' } }),
+      { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: 'Record it.' } })
+    assert.equal(r.received.at(-1).params.summary, 'app.example.test GET /a HTTP/1.1', 'headers and cookies are never reported')
+    assert.deepEqual(await out({ hook_event_name: 'Stop', last_assistant_message: 'Done', stop_hook_active: false }), { decision: 'block', reason: 'Record before you finish.' })
+    assert.deepEqual(await out({ hook_event_name: 'Stop', last_assistant_message: 'Saved', stop_hook_active: true }), {})
   } finally { await r.close() }
 })
 

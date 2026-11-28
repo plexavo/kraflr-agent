@@ -5,7 +5,7 @@ import { labRefusal } from './guard-client.ts'
 
 /** Claude Code lifecycle hook for Kraflr sessions. Reads one event on stdin, relays it to the runtime, and never changes a permission decision
  * except to deny three things Kraflr must track itself: untracked sub-agents, edits to a read-only source checkout, and starting a submitted
- * verification lab outside its approved run. */
+ * verification lab outside its approved run. It also passes back the runtime's reminders to record research (see recording.ts). */
 
 let raw = ''
 for await (const chunk of process.stdin) { raw += chunk; if (raw.length > 2 * 1024 * 1024) break }
@@ -29,6 +29,14 @@ function denial(event: { tool_name?: unknown; tool_input?: Record<string, unknow
   if (root && writers.test(tool) && typeof file === 'string' && inside(root, file)) {
     return 'This research panel has read-only access to the source checkout. Write notes, harnesses and lab files in your session or lab folder instead.'
   }
+}
+
+/** What a gateway tool was pointed at: for a Burp request only the host and request line, never its headers or cookies. */
+function gatewayCall(input: Record<string, unknown>) {
+  const pseudo = (input.pseudoHeaders ?? {}) as Record<string, unknown>
+  const line = typeof input.content === 'string' ? input.content.split(/\r?\n|\\r|\\n/)[0]
+    : [pseudo[':method'] ?? pseudo.method, pseudo[':path'] ?? pseudo.path].filter(Boolean).join(' ')
+  return [input.targetHostname, line, input.path, input.regex].filter((part) => typeof part === 'string' && part).join(' ')
 }
 
 // Claude Code can write the final message to its transcript slightly after Stop fires, so this is only a fallback for last_assistant_message.
@@ -67,12 +75,14 @@ try {
   if (name === 'PostToolUse') {
     // A record of what the agent did, including tools that never touch the scope proxy. Bounded and best effort: it must not slow or change the tool.
     const tool = String(event.tool_name ?? ''), input = (event.tool_input ?? {}) as Record<string, unknown>
-    const summary = String(tool === 'Bash' ? input.command ?? '' : tool === 'WebFetch' ? input.url ?? '' : tool === 'WebSearch' ? input.query ?? '' : input.file_path ?? input.notebook_path ?? '').slice(0, 600)
-    if (/^[A-Za-z_]{2,40}$/.test(tool) && summary) {
+    const summary = String(tool === 'Bash' ? input.command ?? '' : tool === 'WebFetch' ? input.url ?? '' : tool === 'WebSearch' ? input.query ?? ''
+      : tool.startsWith('mcp__') ? gatewayCall(input) : input.file_path ?? input.notebook_path ?? '').slice(0, 600)
+    let context: unknown
+    if (/^[A-Za-z0-9_]{2,80}$/.test(tool) && summary) {
       const client = new RpcClient({ socket: process.env.KRAFLR_SOCKET ?? '', token: process.env.KRAFLR_AGENT_TOKEN ?? '', agent: process.env.KRAFLR_AGENT_ID })
-      try { await client.call('activity', { tool, summary }, 1500) } catch { /* Recording is optional. */ } finally { client.close() }
+      try { context = ((await client.call('activity', { tool, summary }, 1500)) as { context?: unknown } | undefined)?.context } catch { /* Recording is optional. */ } finally { client.close() }
     }
-    reply(); process.exit(0)
+    reply(typeof context === 'string' ? { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: context } } : {}); process.exit(0)
   }
   const kinds: Record<string, string> = { SessionStart: 'SessionStart', UserPromptSubmit: 'UserPromptSubmit', Stop: 'TaskComplete', StopFailure: 'TaskError' }
   const mapped = kinds[name]
@@ -86,12 +96,20 @@ try {
       // StopFailure names why the turn ended (rate_limit, authentication_failed, billing_error...); Kraflr uses it to tell a limit from an ordinary failure.
       error: mapped === 'TaskError' && typeof event.error === 'string' ? event.error : undefined,
       timestamp: typeof event.prompt_id === 'string' ? event.prompt_id : new Date().toISOString(),
+      // True when this turn was already continued by a Stop hook, so it is never held twice.
+      continuing: mapped === 'TaskComplete' && event.stop_hook_active === true ? true : undefined,
     }
     // A completed turn is reported exactly once, so a busy runtime gets a few chances before the event is given up. Repeats are harmless:
     // the runtime resolves a waiting assignment once and saves a direct reply under its stable turn id.
     for (let attempt = 0; attempt < (mapped === 'SessionStart' ? 1 : 3); attempt++) {
       const client = new RpcClient({ socket: process.env.KRAFLR_SOCKET ?? '', token: process.env.KRAFLR_AGENT_TOKEN ?? '', agent: process.env.KRAFLR_AGENT_ID })
-      try { await client.call('hook', payload, 3000); break }
+      try {
+        // The runtime may answer with a reminder to record research: context beside a prompt, or one held turn. Neither is a permission decision.
+        const answer = (await client.call('hook', payload, 3000)) as { context?: unknown; hold?: unknown } | undefined
+        if (name === 'UserPromptSubmit' && typeof answer?.context === 'string') { reply({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: answer.context } }); process.exit(0) }
+        if (name === 'Stop' && typeof answer?.hold === 'string') { reply({ decision: 'block', reason: answer.hold }); process.exit(0) }
+        break
+      }
       catch { await new Promise((done) => setTimeout(done, 400)) }
       finally { client.close() }
     }

@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { EventEmitter } from 'node:events'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { ChildProcess } from 'node:child_process'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
@@ -73,6 +76,40 @@ test('a connected Burp link is listed and proxied under a burp_ prefix, forwardi
   const unknown = await agent.callTool({ name: 'burp_not_a_real_tool', arguments: {} }) as { content: { text: string }[]; isError?: boolean }
   assert.match(unknown.content[0]!.text, /does not report a tool named/)
   assert.equal(unknown.isError, true)
+})
+
+test('long Burp responses are shortened, saved whole, searchable, and a repeated page is not sent twice', async (t) => {
+  const folder = await mkdtemp(join(tmpdir(), 'kraflr-responses-'))
+  t.after(() => rm(folder, { recursive: true, force: true }))
+  const page = (nonce: string, extra = '') => `HttpRequestResponse{httpRequest=GET /a HTTP/1.1\r\nCookie: session=SECRET\r\n\r\n, httpResponse=HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\n\r\n<script nonce="${nonce}"></script>${'<nav>menu</nav>'.repeat(900)}<p>needle-${extra}</p>, messageAnnotations=Annotations{}}`
+  const forwarded: unknown[] = []
+  let reply = page('one')
+  const burpServer = new Server({ name: 'burp', version: '1.0.0' }, { capabilities: { tools: {} } })
+  burpServer.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: ['send_http1_request', 'get_proxy_http_history'].map((name) => ({ name, inputSchema: { type: 'object' as const, properties: { content: { type: 'string' } } } })) }))
+  burpServer.setRequestHandler(CallToolRequestSchema, async (request) => { forwarded.push(request.params.arguments); return { content: [{ type: 'text', text: reply }] } })
+  const burp = await connectedClient(burpServer)
+  const agent = await connectedClient(createGateway({ burpUrl: 'http://fake-burp.invalid', connectBurp: async () => burp, responseDir: folder }))
+
+  const tools = (await agent.listTools()).tools
+  assert.ok(tools.find((tool) => tool.name === 'burp_send_http1_request')!.inputSchema.properties!.kraflr_find)
+  assert.equal(tools.find((tool) => tool.name === 'burp_get_proxy_http_history')!.inputSchema.properties!.kraflr_find, undefined)
+  const send = async (args: Record<string, unknown> = {}, name = 'burp_send_http1_request') => ((await agent.callTool({ name, arguments: { content: 'GET /a', ...args } })) as { content: { text: string }[] }).content[0]!.text
+
+  const first = await send()
+  assert.ok(first.length < 3000, 'shortened'); assert.match(first, /^HTTP\/1\.1 404 Not Found\r?\nContent-Type/); assert.doesNotMatch(first, /SECRET/)
+  assert.equal(await readFile(join(folder, 'response-0001.txt'), 'utf8'), reply, 'the whole result is kept')
+  reply = page('two')
+  assert.match(await send(), /Body is the same as in .*response-0001\.txt/)
+  reply = page('two', 'other-user')
+  assert.doesNotMatch(await send(), /Body is the same/, 'any other difference is shown')
+  assert.match(await send({ kraflr_find: 'needle-[a-z-]+' }), /1 match\(es\)[\s\S]*needle-other-user/)
+  const headers = await send({ kraflr_headers_only: true })
+  assert.match(headers, /404 Not Found/); assert.doesNotMatch(headers, /<nav>/)
+  assert.equal(await send({ kraflr_full: true }), reply)
+  assert.deepEqual(forwarded.at(-1), { content: 'GET /a' }, 'Burp never sees the gateway’s own arguments')
+  assert.equal(await send({}, 'burp_get_proxy_http_history'), reply, 'other tools are untouched')
+  reply = 'HTTP/1.1 200 OK\r\n\r\nsmall'
+  assert.equal(await send(), reply, 'a short response is passed on as it is')
 })
 
 test('a Burp URL saved after the session started reaches the running gateway, which tells the agent its tool list changed', async () => {

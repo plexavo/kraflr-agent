@@ -65,7 +65,9 @@ export function prepareAgentPolicy(cwd: string, scope: ScopeRevision, gateway?: 
     }
   }
   const temporary = join(directory, `kraflr-policy-${randomUUID()}.tmp`)
-  writeFileSync(temporary, JSON.stringify({ ...previous, ...managedAgentPolicy(scope, cwd, gateway) }, null, 2), { flag: 'wx', mode: 0o600 })
+  // Long web responses the gateway shortens are saved whole in this session's own folder.
+  const session = gateway && { ...gateway, env: { ...gateway.env, KRAFLR_RESPONSE_DIR: join(cwd, 'responses') } }
+  writeFileSync(temporary, JSON.stringify({ ...previous, ...managedAgentPolicy(scope, cwd, session) }, null, 2), { flag: 'wx', mode: 0o600 })
   try { renameSync(temporary, target) }
   finally { try { unlinkSync(temporary) } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error } }
 }

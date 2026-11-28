@@ -84,7 +84,7 @@ You also need `git`. Docker, Semgrep and Burp Suite are optional. On a minimal s
 
 ## Leads and Findings
 
-A lead becomes a Finding when an agent confirms it with proof and a control case, an approved Docker test reproduces it, or you accept it yourself.
+A lead becomes a Finding when an agent confirms it with proof and a control case, an approved Docker test reproduces it, or you accept it yourself. An agent moves a lead it tested and ruled out to Killed leads with its reason, and you can reopen it. Claude Code sessions are reminded to keep these records current.
 
 > [!IMPORTANT]
 > Kraflr does not check an agent's proof. Read it before you report a Finding.

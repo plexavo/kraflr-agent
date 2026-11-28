@@ -43,6 +43,8 @@ export interface LeadReview {
 
 /** How the note of a Finding an agent confirmed itself begins, so it is never shown as the researcher's own acceptance. */
 export const agentConfirmed = 'Confirmed by '
+/** The same for a lead an agent ruled out itself. */
+export const agentKilled = 'Killed by '
 
 /** The agent's confirmation that made this lead a Finding, if that is how it got there (not the researcher, not an approved test). Reviews are newest first. */
 export function confirmationNote(reviews: LeadReview[]) {

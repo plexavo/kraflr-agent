@@ -135,7 +135,7 @@ export function createNativeRuntime(scratch: string, store: ResearchStore, socke
       + 'For flexible handoffs, use `kraflr agent send <id-or-unique-name> "task"` without waiting and `kraflr agent inbox` to read saved messages/results. Kraflr delivers each reply to a `send` into your prompt as soon as you are idle, so you do not have to poll the inbox; use it only to review history. Parent and Child are coordination roles, not communication restrictions. Never create a waiting cycle or auto-approve a native request.\n'
       + 'Record leads with `kraflr agent lead --title "..." --path '+(panel.type==='web'?'"POST /api/export" (the endpoint) ':'"src/file.php" --lines 10-20 ')+'--why "what you saw" --hypothesis "the suspected broken check" --attack "who reaches it and how" --impact "what an attacker gains"` as soon as you have one. Each of hypothesis, attack and impact needs at least 12 characters. Add `--id <lead id>` to update a lead you already recorded. A final kraflr-result JSON block is optional.\n'
       + 'Start by reading the saved attack-surface map with `kraflr agent map`.'+(panel.type!=='web'?' It may already hold a Semgrep first pass Kraflr ran automatically; treat each hit as a reachability question to answer, not as a finding, most are noise.':'')+' If there is none, map the target as you work (entry points, authentication, trust boundaries, sinks, what you already tested) and save it with `kraflr agent map --file map.md` (write map.md in your session folder; add --append to extend it), so no later session repeats your recon.\n'
-      + 'You do not need Kraflr verification to report a result. State plainly how far you proved it (reasoned from code, reproduced live with a request and response, or reproduced with a control case) in --why. The researcher kills or accepts anything you have not confirmed.\n'
+      + 'You do not need Kraflr verification to report a result. State plainly how far you proved it (reasoned from code, reproduced live with a request and response, or reproduced with a control case) in --why. Kill a lead your own test ruled out with `kraflr agent kill <lead-id> --tested "what you tried and what came back" --reason "why that rules it out"` (for a dead end that was never a lead, leave out the ID and add --title and --path). The researcher decides on the rest and can reopen anything you killed.\n'
       + 'Use `kraflr agent note "plain English progress"` for a status update. Do not auto-approve native tool requests.\n'
       + terminalTeamInstructions+'\n'
       // Claude Code's Bash tool is Git Bash even on Windows; Cline and the others use the platform shell.
@@ -153,7 +153,7 @@ export function createNativeRuntime(scratch: string, store: ResearchStore, socke
     // Cline never reads an MCP file from the project folder: it is pointed at this session's file, which also keeps the researcher's own servers.
     const shared = process.env.CLINE_MCP_SETTINGS_PATH?.trim() || join(process.env.CLINE_DATA_DIR?.trim() || join(process.env.CLINE_DIR?.trim() || join(homedir(),'.cline'),'data'),'settings','cline_mcp_settings.json')
     const mcpFile = join(cwd,'.cline','cline_mcp_settings.json')
-    await privateFile(mcpFile, JSON.stringify(clineMcpSettings(await readFile(shared,'utf8').catch(()=>''), gatewayServerConfig(process.execPath, root, dataDir)), null, 2)+'\n')
+    await privateFile(mcpFile, JSON.stringify(clineMcpSettings(await readFile(shared,'utf8').catch(()=>''), gatewayServerConfig(process.execPath, root, dataDir, undefined, join(cwd,'responses'))), null, 2)+'\n')
     for (const name of ['TaskStart', 'UserPromptSubmit', 'TaskComplete', 'TaskError', 'TaskCancel','PreToolUse']) {
       await privateFile(join(cwd, '.cline', 'hooks', `${name}.js`), `#!/usr/bin/env node\nawait import(${JSON.stringify(hookFile)});\n`,0o700)
     }
@@ -179,7 +179,7 @@ export function createNativeRuntime(scratch: string, store: ResearchStore, socke
     await privateFile(join(cwd,'AGENTS.md'), text)
     // These settings apply to this session only (--settings); the researcher's own Claude Code configuration is never edited.
     const autonomy = autonomyFromEnvironment()
-    const gateway = gatewayServerConfig(process.execPath, root, dataDir)
+    const gateway = gatewayServerConfig(process.execPath, root, dataDir, undefined, join(cwd,'responses'))
     const settings = claudeSettings(process.execPath, join(root,'cli','claude-hook.ts'), autonomy, true)
     const settingsFile = join(cwd,'.claude','kraflr-settings.json')
     await privateFile(settingsFile, JSON.stringify(settings,null,2)+'\n')
@@ -328,6 +328,8 @@ export function createNativeRuntime(scratch: string, store: ResearchStore, socke
   return { terminals,
     authenticate(id: string, token: string) { const expected = bridgeTokens.get(id); return Boolean(expected && expected.length === token.length && timingSafeEqual(Buffer.from(expected), Buffer.from(token))) },
     redact(id:string,text:string){return sessions.get(id)?.redact(text)??secretRedactor([bridgeTokens.get(id)]).redact(text)},
+    /** Whether Kraflr is waiting for this agent’s current turn to return a report. */
+    assigned(id: string) { const session = sessions.get(id); return Boolean(session?.pending || session?.reserved) },
     ready(id: string) { const session = sessions.get(id); if (session) {current(session);if(session.pending)throw new StoreError(409,'This agent has an active assignment. Finish or stop it first.');const state=session.prompt.confirm();if(!state.ready)throw new StoreError(409,state.reason+'. Clear the native prompt and resolve pending work first.');session.ready = true;session.booting=false;session.info.activity='idle'; return true }; return false },
     respond(panel:string,id:string,text:string){const session=sessions.get(id);if(session){find(panel,id);current(session);session.process.write(text)}else legacy.input(panel,id,text)},
     async hook(id: string, payload: { name: string; sessionId?: string; text?: string;prompt?:string;timestamp?:string;error?:string }) {

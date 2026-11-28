@@ -68,9 +68,9 @@ if(command==='--core'){
       else if(rest[0]==='--text')result=await rpc.call('map',{text:rest.slice(1).join(' '),append})
       else result=await rpc.call('map',{})
     }
-    else if(sub==='lead'||sub==='confirm'){
-      // --flag value pairs; an unquoted value may span several words. `confirm` takes the lead ID first.
-      const id=sub==='confirm'&&!args[0]?.startsWith('--')?args.shift():undefined
+    else if(sub==='lead'||sub==='confirm'||sub==='kill'){
+      // --flag value pairs; an unquoted value may span several words. `confirm` and `kill` take the lead ID first.
+      const id=sub!=='lead'&&!args[0]?.startsWith('--')?args.shift():undefined
       const flags:Record<string,string>={};let key=''
       for(const arg of args){if(/^--[a-z][a-z-]*$/.test(arg)){key=arg.slice(2);flags[key]='';continue}if(key)flags[key]=((flags[key]??'')+' '+arg).trim()}
       // --proof-file reads longer output from this session’s scratch folder.
@@ -78,7 +78,7 @@ if(command==='--core'){
       result=await rpc.call(sub,id?{...flags,id}:flags)
     }
     else if(sub==='record')result=await rpc.call('record',{text:await scratchFile(args,'record --file report.json',128_000)})
-    else throw new Error('Agent commands: context, team, ask/send <id or name> <message>, inbox, note <message>, map [--file map.md | --text "..."] [--append], lead --title "..." --path "..." [--lines 10-20] --why "..." --hypothesis "..." --attack "..." --impact "..." [--id <lead id>], confirm <lead-id> --proof "..." --control "..." [--proof-file output.txt], record --file report.json, verification <status|plan|prepare|recover|run|retry|docker|report|fail> [saved-id].')
+    else throw new Error('Agent commands: context, team, ask/send <id or name> <message>, inbox, note <message>, map [--file map.md | --text "..."] [--append], lead --title "..." --path "..." [--lines 10-20] --why "..." --hypothesis "..." --attack "..." --impact "..." [--id <lead id>], confirm <lead-id> --proof "..." --control "..." [--proof-file output.txt], kill <lead-id> --tested "..." --reason "..." (or --title "..." --path "..." instead of the ID), record --file report.json, verification <status|plan|prepare|recover|run|retry|docker|report|fail> [saved-id].')
     console.log(JSON.stringify(result,null,2))
   }finally{rpc.close()}
 }else{

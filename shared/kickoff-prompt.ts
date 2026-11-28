@@ -41,7 +41,7 @@ export function kickoffPrompt(panel: PanelDetail, depth: HuntDepth = 'standard')
       `Rules of engagement: ${rules}`,
       `Access: ${scope.accessMode === 'read_write' ? 'state-changing tests allowed where the rules allow them' : 'read-only testing (GET, HEAD, OPTIONS)'}.${restrictions ? ' Restrictions: ' + clip(restrictions, 400) : ''}`,
       '',
-      `Work freely with any tool (curl, nmap, ffuf, your own scripts). Check your tools for a \`kraflr\` MCP server and call \`burp_status\`; if Burp is connected, prefer its request tools over plain curl. Read \`kraflr agent map\` first, extend it if thin. Record each lead the moment you find it with \`kraflr agent lead\` (path is the endpoint, e.g. "POST /api/export"), proven as far as you can. Move a lead to Findings with \`kraflr agent confirm\` only when you reproduced it with a control case; I decide on the rest. ${depthClause(depth, 'web')} Stay non-destructive: no DoS, brute force, mass extraction or changes to real user data.`,
+      `Work freely with any tool (curl, nmap, ffuf, your own scripts). Check your tools for a \`kraflr\` MCP server and call \`burp_status\`; if Burp is connected, prefer its request tools over plain curl. Read \`kraflr agent map\` first, extend it if thin. Record each lead the moment you find it with \`kraflr agent lead\` (path is the endpoint, e.g. "POST /api/export"), proven as far as you can. Move a lead to Findings with \`kraflr agent confirm\` only when you reproduced it with a control case; I decide on the rest. Record what your tests rule out with \`kraflr agent kill\`. ${depthClause(depth, 'web')} Stay non-destructive: no DoS, brute force, mass extraction or changes to real user data.`,
     ].join('\n')
   }
   const source = scope.repository ? `${scope.repository}${scope.revision ? ' @ ' + scope.revision : ''}` : 'a repository that still needs to be found'
@@ -52,6 +52,6 @@ export function kickoffPrompt(panel: PanelDetail, depth: HuntDepth = 'standard')
     `Access: ${accessLabels[scope.accessMode].toLowerCase()}.${restrictions ? ' Restrictions: ' + clip(restrictions, 400) : ''}`,
     ...(scope.repositoryMode === 'discover' ? [`The official repository is not confirmed yet: find it first (${clip(scope.repositoryDiscovery.trim() || 'use the target name', 300)}) and return a repositorySuggestion for me to review before any analysis.`] : []),
     '',
-    `Read \`kraflr agent map\` first (it may already hold a Semgrep pass — treat hits as reachability questions, not findings); extend it if thin. Record each concrete lead immediately with \`kraflr agent lead\`, exact file and lines, and how far you proved it. Move a lead to Findings with \`kraflr agent confirm\` only when you reproduced it with a control case; I decide on the rest. ${depthClause(depth, 'source')}`,
+    `Read \`kraflr agent map\` first (it may already hold a Semgrep pass — treat hits as reachability questions, not findings); extend it if thin. Record each concrete lead immediately with \`kraflr agent lead\`, exact file and lines, and how far you proved it. Move a lead to Findings with \`kraflr agent confirm\` only when you reproduced it with a control case; I decide on the rest. Record what your tests rule out with \`kraflr agent kill\`. ${depthClause(depth, 'source')}`,
   ].join('\n')
 }

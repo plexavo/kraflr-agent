@@ -10,7 +10,7 @@ import { parseWebTargets } from '../shared/web-scope.ts'
 import { burpHint } from '../shared/burp.ts'
 import { kickoffPrompt, huntDepths, type HuntDepth } from '../shared/kickoff-prompt.ts'
 import { agentDetails, type AgentTerminalInfo } from '../shared/agent-terminal.ts'
-import { confirmationNote, type EvidenceLead, type EvidenceTag } from '../shared/evidence.ts'
+import { agentKilled, confirmationNote, type EvidenceLead, type EvidenceTag } from '../shared/evidence.ts'
 import { activity, activityGlyph, activityLabels, activityTone, assignedWork, visibleAttention, visibleLimit, orbit, kraflrAscii } from './activity.ts'
 import { TerminalInput, type TerminalInputEvent } from './terminal-input.ts'
 import { ApprovalInput } from './approval-input.ts'
@@ -355,7 +355,8 @@ export async function runTui(rpc:RpcClient) {
       if(!values[0]!.trim())throw new Error('Record the reason.')
       await api(`/api/panels/${selectedPanel}/evidence/${encodeURIComponent(lead.id)}`,'PUT',{expectedVersion:lead.reviews[0]?.version??0,status:tag==='lead'?'open':'closed',tag,note:values[0]!.trim(),nextAction:''});form=undefined;await refresh();alert(done)
     })
-    const hint=lead.tag==='finding'?(confirmed?'An agent confirmed this itself. Check its proof below; if it does not hold up, move it back to Leads.':''):lead.tag==='lead'?'An agent moves this to Findings once it has proven it. You can also accept it with your own evidence, challenge it, or rule it out.':''
+    const agentRuledOut=lead.tag==='killed_lead'&&Boolean(lead.reviews[0]?.note.startsWith(agentKilled))
+    const hint=lead.tag==='finding'?(confirmed?'An agent confirmed this itself. Check its proof below; if it does not hold up, move it back to Leads.':''):lead.tag==='lead'?'An agent moves this to Findings once it has proven it. You can also accept it with your own evidence, challenge it, or rule it out.':agentRuledOut?'An agent ruled this out itself. Check what it tested below; if that does not hold up, reopen it.':''
     // The verification entry comes first because it is what changes; then the decision, then the ways to learn more.
     const progressChoice:Choice[]=progress&&progress.state!=='unverified'&&!(confirmed&&!tested)?[{label:progress.state==='verified'?'View verified result':['failed','interrupted'].includes(progress.state)?'View error · inform agent or cancel':'View verification progress',tone:stateTone(progress.state),run:()=>action(()=>verification(lead))}]:[]
     show(lead.title,[`${lead.tag==='finding'?'Finding':lead.tag==='killed_lead'?'Killed lead':'Lead'} · ${progress?.label??'Unverified'}`,`Source: ${lead.path}:${lead.startLine}–${lead.endLine}`,'',lead.explanation,...(lead.reviews[0]?.note?['','Latest note: '+lead.reviews[0].note]:[]),...(hint?['',hint]:[])],[
@@ -370,6 +371,7 @@ export async function runTui(rpc:RpcClient) {
         {label:'Generate PoC',run:()=>action(async()=>{const result=await rpc.call('poc',{panel:selectedPanel,leadId:lead.id});menu=undefined;alert(result.agent+' is writing a proof of concept. Open this Finding again and choose "View PoC" once it is done.','progress')})},
         ...(pocNote(lead)?[{label:'View PoC',run:()=>action(()=>pocView(lead))}]:[]),
         {label:'Not valid · move back to Leads',run:()=>review('lead','Move back to Leads','Why is this not a Finding?','Moved back to Leads with your reason; only you can accept it again.')}]:[]),
+      ...(lead.tag==='killed_lead'?[{label:'Reopen · move back to Leads',run:()=>review('lead','Reopen this lead','Why reopen it?','Moved back to Leads with your reason; only you can accept or rule it out now.')}]:[]),
       {label:'Explain in plain English',run:()=>action(()=>explain(lead))},
     ])
   }
